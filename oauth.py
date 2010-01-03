@@ -25,7 +25,8 @@ A typical use case inside an AppEngine controller would be:
   get the authenticated user information.
 
   auth_token = self.request.get("oauth_token")
-  user_info = client.get_user_info(auth_token)
+  auth_verifier = self.request.get("oauth_verifier")
+  user_info = client.get_user_info(auth_token, auth_verifier=auth_verifier)
 
   The "user_info" variable should then contain a dictionary of various
   user information (id, picture url, etc). What you do with that data is up
@@ -35,10 +36,11 @@ A typical use case inside an AppEngine controller would be:
 
 4) If you need to, you can also call other other API URLs using
   client.make_request() as long as you supply a valid API URL and an access
-  token and secret.
+  token and secret. Note, you may need to set method=urlfetch.POST.
 
-@author: Mike Knapp <micknapp@gmail.com>
-@copyright: Unrestricted. Feel free to use modify however you see fit.
+@author: Mike Knapp
+@copyright: Unrestricted. Feel free to use modify however you see fit. Please
+note however this software is unsupported. Please don't email me about it. :)
 """
 
 from google.appengine.api import memcache
@@ -103,8 +105,8 @@ class OAuthClient():
     self.access_url = access_url
     self.callback_url = callback_url
 
-  def make_request(self, url, token="", secret="", additional_params=None,
-                   protected=False):
+  def make_request(self, url, token="", secret="", additional_params={},
+                   protected=False, method=urlfetch.GET):
     """Make Request.
 
     Make an authenticated request to any OAuth protected resource. At present
@@ -131,15 +133,15 @@ class OAuthClient():
     elif self.callback_url:
       params["oauth_callback"] = self.callback_url
 
-    if additional_params:
-      params.update(additional_params)
+    params.update(additional_params)
 
     # Join all of the params together.
     params_str = "&".join(["%s=%s" % (encode(k), encode(params[k]))
                            for k in sorted(params)])
 
     # Join the entire message together per the OAuth specification.
-    message = "&".join(["GET", encode(url), encode(params_str)])
+    message = "&".join(["GET" if method == urlfetch.GET else "POST",
+                        encode(url), encode(params_str)])
 
     # Create a HMAC-SHA1 signature of the message.
     key = "%s&%s" % (self.consumer_secret, secret) # Note compulsory "&".
@@ -150,11 +152,9 @@ class OAuthClient():
     # Construct and fetch the URL and return the result object.
     url = "%s?%s" % (url, urlencode(params))
 
-    headers = {}
-    if protected:
-      headers["Authorization"] = "OAuth"
-
-    return urlfetch.fetch(url, headers=headers)
+    headers = {"Authorization": "OAuth"} if protected else {}
+    payload = urlencode(params) if method == urlfetch.POST else None
+    return urlfetch.fetch(url, method=method, headers=headers, payload=payload)
 
   def get_authorization_url(self):
     """Get Authorization URL.
