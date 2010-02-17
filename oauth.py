@@ -60,6 +60,10 @@ from urllib import unquote as urlunquote
 import logging
 
 
+class OAuthException(Exception):
+    pass
+
+
 def get_oauth_client(service, key, secret, callback_url):
   """Get OAuth Client.
 
@@ -105,16 +109,13 @@ class OAuthClient():
     self.access_url = access_url
     self.callback_url = callback_url
 
-  def make_request(self, url, token="", secret="", additional_params={},
-                   protected=False, method=urlfetch.GET):
-    """Make Request.
+  def prepare_request(self, url, token="", secret="", additional_params=None,
+                      method=urlfetch.GET):
+    """Prepare Request.
 
-    Make an authenticated request to any OAuth protected resource. At present
-    only GET requests are supported.
+    Prepares an authenticated request to any OAuth protected resource.
 
-    If protected is equal to True, the Authorization: OAuth header will be set.
-
-    A urlfetch response object is returned.
+    Returns the payload of the request.
     """
 
     def encode(text):
@@ -133,7 +134,12 @@ class OAuthClient():
     elif self.callback_url:
       params["oauth_callback"] = self.callback_url
 
-    params.update(additional_params)
+    if additional_params:
+        params.update(additional_params)
+
+    for k,v in params.items():
+        if isinstance(v, unicode):
+            params[k] = v.encode('utf8')
 
     # Join all of the params together.
     params_str = "&".join(["%s=%s" % (encode(k), encode(params[k]))
@@ -149,13 +155,34 @@ class OAuthClient():
     digest_base64 = signature.digest().encode("base64").strip()
     params["oauth_signature"] = digest_base64
 
-    # Construct and fetch the URL and return the result object.
-    url = "%s?%s" % (url, urlencode(params))
+    # Construct the request payload and return it
+    return urlencode(params)
+    
+    
+  def make_async_request(self, url, token="", secret="", additional_params=None,
+                   protected=False, method=urlfetch.GET):
+    """Make Request.
 
+    Make an authenticated request to any OAuth protected resource.
+
+    If protected is equal to True, the Authorization: OAuth header will be set.
+
+    A urlfetch response object is returned.
+    """      
+    payload = self.prepare_request(url, token, secret, additional_params,
+                                   method)
+    if method == urlfetch.GET:
+        url = "%s?%s" % (url, payload)
+        payload = None
     headers = {"Authorization": "OAuth"} if protected else {}
-    payload = urlencode(params) if method == urlfetch.POST else None
-    return urlfetch.fetch(url, method=method, headers=headers, payload=payload)
+    rpc = urlfetch.create_rpc(deadline=10.0)
+    urlfetch.make_fetch_call(rpc, url, method=method, headers=headers, payload=payload)
+    return rpc
 
+  def make_request(self, url, token="", secret="", additional_params=None,
+                                      protected=False, method=urlfetch.GET):
+    return self.make_async_request(url, token, secret, additional_params, protected, method).get_result()
+  
   def get_authorization_url(self):
     """Get Authorization URL.
 
@@ -257,7 +284,7 @@ class OAuthClient():
 
     if not (token and secret) or result.status_code != 200:
       logging.error("Could not extract token/secret: %s" % result.content)
-      raise Exception, "Problem talking to the service"
+      raise OAuthException("Problem talking to the service")
 
     return {
       "service": self.service_name,
