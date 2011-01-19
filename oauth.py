@@ -76,6 +76,8 @@ def get_oauth_client(service, key, secret, callback_url):
     return YahooClient(key, secret, callback_url)
   elif service == "myspace":
     return MySpaceClient(key, secret, callback_url)
+  elif service == "dropbox":
+    return DropboxClient(key, secret, callback_url)
   else:
     raise Exception, "Unknown OAuth service %s" % service
 
@@ -462,5 +464,47 @@ class YahooClient(OAuthClient):
     user_info["username"] = data["nickname"].lower()
     user_info["name"] = data["nickname"]
     user_info["picture"] = data["image"]["imageUrl"]
+
+    return user_info
+
+class DropboxClient(OAuthClient):
+  """Dropbox Client.
+
+  A client for talking to the Dropbox API using OAuth as the
+  authentication model.
+  """
+
+  def __init__(self, consumer_key, consumer_secret, callback_url):
+    """Constructor."""
+
+    OAuthClient.__init__(self,
+        "dropbox",
+        consumer_key,
+        consumer_secret,
+        "https://api.dropbox.com/0/oauth/request_token",
+        "https://api.dropbox.com/0/oauth/access_token",
+        callback_url)
+
+  def get_authorization_url(self):
+    """Get Authorization URL."""
+
+    token = self._get_auth_token()
+    return "http://www.dropbox.com/0/oauth/authorize?oauth_token=%s&oauth_callback=%s" %( token, urlquote(self.callback_url))
+
+  def _lookup_user_info(self, access_token, access_secret):
+    """Lookup User Info.
+
+    Lookup the user on Dropbox.
+    """
+
+    response = self.make_request(
+        "http://api.dropbox.com/0/account/info",
+        token=access_token, secret=access_secret, protected=True)
+
+    data = json.loads(response.content)
+    user_info = self._get_default_user_info()
+    user_info["id"] = data["uid"]
+    user_info["name"] = data["display_name"]
+    user_info["country"] = data["country"]
 
     return user_info
