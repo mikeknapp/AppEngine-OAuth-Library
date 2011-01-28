@@ -63,6 +63,11 @@ import logging
 TWITTER = "twitter"
 YAHOO = "yahoo"
 MYSPACE = "myspace"
+DROPBOX = "dropbox"
+
+
+class OAuthException(Exception):
+  pass
 
 
 def get_oauth_client(service, key, secret, callback_url):
@@ -77,6 +82,8 @@ def get_oauth_client(service, key, secret, callback_url):
     return YahooClient(key, secret, callback_url)
   elif service == MYSPACE:
     return MySpaceClient(key, secret, callback_url)
+  elif service == DROPBOX:
+    return DropboxClient(key, secret, callback_url)
   else:
     raise Exception, "Unknown OAuth service %s" % service
 
@@ -110,16 +117,13 @@ class OAuthClient():
     self.access_url = access_url
     self.callback_url = callback_url
 
-  def make_request(self, url, token="", secret="", additional_params={},
-                   protected=False, method=urlfetch.GET, t=None, nonce=None):
-    """Make Request.
+  def prepare_request(self, url, token="", secret="", additional_params=None,
+                      method=urlfetch.GET, t=None, nonce=None):
+    """Prepare Request.
 
-    Make an authenticated request to any OAuth protected resource. At present
-    only GET requests are supported.
+    Prepares an authenticated request to any OAuth protected resource.
 
-    If protected is equal to True, the Authorization: OAuth header will be set.
-
-    A urlfetch response object is returned.
+    Returns the payload of the request.
     """
 
     def encode(text):
@@ -138,7 +142,12 @@ class OAuthClient():
     elif self.callback_url:
       params["oauth_callback"] = self.callback_url
 
-    params.update(additional_params)
+    if additional_params:
+        params.update(additional_params)
+
+    for k,v in params.items():
+        if isinstance(v, unicode):
+            params[k] = v.encode('utf8')
 
     # Join all of the params together.
     params_str = "&".join(["%s=%s" % (encode(k), encode(params[k]))
@@ -154,12 +163,39 @@ class OAuthClient():
     digest_base64 = signature.digest().encode("base64").strip()
     params["oauth_signature"] = digest_base64
 
-    # Construct and fetch the URL and return the result object.
-    url = "%s?%s" % (url, urlencode(params))
+    # Construct the request payload and return it
+    return urlencode(params)
+
+  def make_async_request(self, url, token="", secret="", additional_params=None,
+                   protected=False, method=urlfetch.GET):
+    """Make Request.
+
+    Make an authenticated request to any OAuth protected resource.
+
+    If protected is equal to True, the Authorization: OAuth header will be set.
+
+    A urlfetch response object is returned.
+    """
+
+    payload = self.prepare_request(url, token, secret, additional_params,
+                                   method)
+
+    if method == urlfetch.GET:
+      url = "%s?%s" % (url, payload)
+      payload = None
 
     headers = {"Authorization": "OAuth"} if protected else {}
-    payload = urlencode(params) if method == urlfetch.POST else None
-    return urlfetch.fetch(url, method=method, headers=headers, payload=payload)
+
+    rpc = urlfetch.create_rpc(deadline=10.0)
+    urlfetch.make_fetch_call(rpc, url, method=method, headers=headers,
+                             payload=payload)
+    return rpc
+
+  def make_request(self, url, token="", secret="", additional_params=None,
+                   protected=False, method=urlfetch.GET):
+
+    return self.make_async_request(url, token, secret, additional_params,
+                                   protected, method).get_result()
 
   def get_authorization_url(self):
     """Get Authorization URL.
@@ -262,7 +298,7 @@ class OAuthClient():
 
     if not (token and secret) or result.status_code != 200:
       logging.error("Could not extract token/secret: %s" % result.content)
-      raise Exception, "Problem talking to the service"
+      raise OAuthException("Problem talking to the service")
 
     return {
       "service": self.service_name,
@@ -309,15 +345,20 @@ class TwitterClient(OAuthClient):
         TWITTER,
         consumer_key,
         consumer_secret,
-        "http://twitter.com/oauth/request_token",
-        "http://twitter.com/oauth/access_token",
+        "http://api.twitter.com/oauth/request_token",
+        "http://api.twitter.com/oauth/access_token",
         callback_url)
 
   def get_authorization_url(self):
     """Get Authorization URL."""
 
     token = self._get_auth_token()
-    return "http://twitter.com/oauth/authorize?oauth_token=%s" % token
+    return "http://api.twitter.com/oauth/authorize?oauth_token=%s" % token
+
+  def get_authenticate_url(self):
+    """Get Authentication URL."""
+    token = self._get_auth_token()
+    return "http://api.twitter.com/oauth/authenticate?oauth_token=%s" % token
 
   def _lookup_user_info(self, access_token, access_secret):
     """Lookup User Info.
@@ -326,7 +367,7 @@ class TwitterClient(OAuthClient):
     """
 
     response = self.make_request(
-        "http://twitter.com/account/verify_credentials.json",
+        "http://api.twitter.com/account/verify_credentials.json",
         token=access_token, secret=access_secret, protected=True)
 
     data = json.loads(response.content)
@@ -440,5 +481,50 @@ class YahooClient(OAuthClient):
     user_info["username"] = data["nickname"].lower()
     user_info["name"] = data["nickname"]
     user_info["picture"] = data["image"]["imageUrl"]
+
+    return user_info
+
+
+class DropboxClient(OAuthClient):
+  """Dropbox Client.
+
+  A client for talking to the Dropbox API using OAuth as the authentication
+  model.
+  """
+
+  def __init__(self, consumer_key, consumer_secret, callback_url):
+    """Constructor."""
+
+    OAuthClient.__init__(self,
+        DROPBOX,
+        consumer_key,
+        consumer_secret,
+        "https://api.dropbox.com/0/oauth/request_token",
+        "https://api.dropbox.com/0/oauth/access_token",
+        callback_url)
+
+  def get_authorization_url(self):
+    """Get Authorization URL."""
+
+    token = self._get_auth_token()
+    return ("http://www.dropbox.com/0/oauth/authorize?"
+            "oauth_token=%s&oauth_callback=%s" % (token,
+                                                  urlquote(self.callback_url)))
+
+  def _lookup_user_info(self, access_token, access_secret):
+    """Lookup User Info.
+
+    Lookup the user on Dropbox.
+    """
+
+    response = self.make_request("http://api.dropbox.com/0/account/info",
+                                 token=access_token, secret=access_secret,
+                                 protected=True)
+
+    data = json.loads(response.content)
+    user_info = self._get_default_user_info()
+    user_info["id"] = data["uid"]
+    user_info["name"] = data["display_name"]
+    user_info["country"] = data["country"]
 
     return user_info
