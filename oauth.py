@@ -60,17 +60,22 @@ from urllib import unquote as urlunquote
 import logging
 
 
+TWITTER = "twitter"
+YAHOO = "yahoo"
+MYSPACE = "myspace"
+
+
 def get_oauth_client(service, key, secret, callback_url):
   """Get OAuth Client.
 
   A factory that will return the appropriate OAuth client.
   """
 
-  if service == "twitter":
+  if service == TWITTER:
     return TwitterClient(key, secret, callback_url)
-  elif service == "yahoo":
+  elif service == YAHOO:
     return YahooClient(key, secret, callback_url)
-  elif service == "myspace":
+  elif service == MYSPACE:
     return MySpaceClient(key, secret, callback_url)
   else:
     raise Exception, "Unknown OAuth service %s" % service
@@ -106,7 +111,7 @@ class OAuthClient():
     self.callback_url = callback_url
 
   def make_request(self, url, token="", secret="", additional_params={},
-                   protected=False, method=urlfetch.GET):
+                   protected=False, method=urlfetch.GET, t=None, nonce=None):
     """Make Request.
 
     Make an authenticated request to any OAuth protected resource. At present
@@ -118,13 +123,13 @@ class OAuthClient():
     """
 
     def encode(text):
-      return urlquote(str(text), "")
+      return urlquote(str(text), "~")
 
     params = {
       "oauth_consumer_key": self.consumer_key,
       "oauth_signature_method": "HMAC-SHA1",
-      "oauth_timestamp": str(int(time())),
-      "oauth_nonce": str(getrandbits(64)),
+      "oauth_timestamp": t if t else str(int(time())),
+      "oauth_nonce": nonce if nonce else str(getrandbits(64)),
       "oauth_version": "1.0"
     }
 
@@ -141,7 +146,7 @@ class OAuthClient():
 
     # Join the entire message together per the OAuth specification.
     message = "&".join(["GET" if method == urlfetch.GET else "POST",
-                        encode(url), encode(params_str)])
+                       encode(url), encode(params_str)])
 
     # Create a HMAC-SHA1 signature of the message.
     key = "%s&%s" % (self.consumer_secret, secret) # Note compulsory "&".
@@ -194,10 +199,10 @@ class OAuthClient():
         auth_secret = result.secret
 
     response = self.make_request(self.access_url,
-                                token=auth_token,
-                                secret=auth_secret,
-                                additional_params={"oauth_verifier":
-                                                    auth_verifier})
+                                 token=auth_token,
+                                 secret=auth_secret,
+                                 additional_params={"oauth_verifier":
+                                                     auth_verifier})
 
     # Extract the access token/secret from the response.
     result = self._extract_credentials(response)
@@ -301,7 +306,7 @@ class TwitterClient(OAuthClient):
     """Constructor."""
 
     OAuthClient.__init__(self,
-        "twitter",
+        TWITTER,
         consumer_key,
         consumer_secret,
         "http://twitter.com/oauth/request_token",
@@ -346,7 +351,7 @@ class MySpaceClient(OAuthClient):
     """Constructor."""
 
     OAuthClient.__init__(self,
-        "myspace",
+        MYSPACE,
         consumer_key,
         consumer_secret,
         "http://api.myspace.com/request_token",
@@ -392,7 +397,7 @@ class YahooClient(OAuthClient):
     """Constructor."""
 
     OAuthClient.__init__(self,
-        "yahoo",
+        YAHOO,
         consumer_key,
         consumer_secret,
         "https://api.login.yahoo.com/oauth/v2/get_request_token",
