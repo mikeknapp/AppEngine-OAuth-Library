@@ -64,6 +64,7 @@ TWITTER = "twitter"
 YAHOO = "yahoo"
 MYSPACE = "myspace"
 DROPBOX = "dropbox"
+LINKEDIN = "linkedin"
 
 
 class OAuthException(Exception):
@@ -84,6 +85,8 @@ def get_oauth_client(service, key, secret, callback_url):
     return MySpaceClient(key, secret, callback_url)
   elif service == DROPBOX:
     return DropboxClient(key, secret, callback_url)
+  elif service == LINKEDIN:
+    return LinkedInClient(key, secret, callback_url)
   else:
     raise Exception, "Unknown OAuth service %s" % service
 
@@ -167,7 +170,7 @@ class OAuthClient():
     return urlencode(params)
 
   def make_async_request(self, url, token="", secret="", additional_params=None,
-                   protected=False, method=urlfetch.GET):
+                         protected=False, method=urlfetch.GET, headers={}):
     """Make Request.
 
     Make an authenticated request to any OAuth protected resource.
@@ -184,7 +187,8 @@ class OAuthClient():
       url = "%s?%s" % (url, payload)
       payload = None
 
-    headers = {"Authorization": "OAuth"} if protected else {}
+    if protected:
+      headers["Authorization"] = "OAuth"
 
     rpc = urlfetch.create_rpc(deadline=10.0)
     urlfetch.make_fetch_call(rpc, url, method=method, headers=headers,
@@ -192,10 +196,10 @@ class OAuthClient():
     return rpc
 
   def make_request(self, url, token="", secret="", additional_params=None,
-                   protected=False, method=urlfetch.GET):
+                   protected=False, method=urlfetch.GET, headers={}):
 
     return self.make_async_request(url, token, secret, additional_params,
-                                   protected, method).get_result()
+                                   protected, method, headers).get_result()
 
   def get_authorization_url(self):
     """Get Authorization URL.
@@ -527,4 +531,53 @@ class DropboxClient(OAuthClient):
     user_info["name"] = data["display_name"]
     user_info["country"] = data["country"]
 
+    return user_info
+
+
+class LinkedInClient(OAuthClient):
+  """LinkedIn Client.
+
+  A client for talking to the LinkedIn API using OAuth as the
+  authentication model.
+  """
+
+  def __init__(self, consumer_key, consumer_secret, callback_url):
+    """Constructor."""
+
+    OAuthClient.__init__(self,
+        LINKEDIN,
+        consumer_key,
+        consumer_secret,
+        "https://api.linkedin.com/uas/oauth/requestToken",
+        "https://api.linkedin.com/uas/oauth/accessToken",
+        callback_url)
+
+  def get_authorization_url(self):
+    """Get Authorization URL."""
+
+    token = self._get_auth_token()
+    return ("https://www.linkedin.com/uas/oauth/authenticate?oauth_token=%s"
+            "&oauth_callback=%s" % (token, urlquote(self.callback_url)))
+
+  def _lookup_user_info(self, access_token, access_secret):
+    """Lookup User Info.
+
+    Lookup the user on LinkedIn
+    """
+
+    user_info = self._get_default_user_info()
+
+    # Grab the user's profile from LinkedIn.
+    response = self.make_request("http://api.linkedin.com/v1/people/~:"
+                                 "(picture-url,id,first-name,last-name)",
+                                 token=access_token,
+                                 secret=access_secret,
+                                 protected=False,
+                                 headers={"x-li-format":"json"})
+
+    data = json.loads(response.content)
+    user_info = self._get_default_user_info()
+    user_info["id"] = data["id"]
+    user_info["picture"] = data["pictureUrl"]
+    user_info["name"] = data["firstName"] + " " + data["lastName"]
     return user_info
