@@ -45,7 +45,6 @@ note however this software is unsupported. Please don't email me about it. :)
 
 from google.appengine.api import memcache
 from google.appengine.api import urlfetch
-from google.appengine.ext import db
 
 from cgi import parse_qs
 from django.utils import simplejson as json
@@ -89,22 +88,6 @@ def get_oauth_client(service, key, secret, callback_url):
     return LinkedInClient(key, secret, callback_url)
   else:
     raise Exception, "Unknown OAuth service %s" % service
-
-
-class AuthToken(db.Model):
-  """Auth Token.
-
-  A temporary auth token that we will use to authenticate a user with a
-  third party website. (We need to store the data while the user visits
-  the third party website to authenticate themselves.)
-
-  TODO: Implement a cron to clean out old tokens periodically.
-  """
-
-  service = db.StringProperty(required=True)
-  token = db.StringProperty(required=True)
-  secret = db.StringProperty(required=True)
-  created = db.DateTimeProperty(auto_now_add=True)
 
 
 class OAuthClient():
@@ -179,7 +162,7 @@ class OAuthClient():
 
     A urlfetch response object is returned.
     """
-
+    
     payload = self.prepare_request(url, token, secret, additional_params,
                                    method)
 
@@ -197,7 +180,7 @@ class OAuthClient():
 
   def make_request(self, url, token="", secret="", additional_params=None,
                    protected=False, method=urlfetch.GET, headers={}):
-
+    
     return self.make_async_request(url, token, secret, additional_params,
                                    protected, method, headers).get_result()
 
@@ -224,19 +207,8 @@ class OAuthClient():
     auth_secret = memcache.get(self._get_memcache_auth_key(auth_token))
 
     if not auth_secret:
-      result = AuthToken.gql("""
-        WHERE
-          service = :1 AND
-          token = :2
-        LIMIT
-          1
-      """, self.service_name, auth_token).get()
-
-      if not result:
-        logging.error("The auth token %s was not found in our db" % auth_token)
-        raise Exception, "Could not find Auth Token in database"
-      else:
-        auth_secret = result.secret
+      logging.error("There is no auth_secret for %s. Please get auth_token and auth_secret again.")
+      raise Exception, "There is no auth_secret"
 
     response = self.make_request(self.access_url,
                                  token=auth_token,
@@ -256,9 +228,8 @@ class OAuthClient():
   def _get_auth_token(self):
     """Get Authorization Token.
 
-    Actually gets the authorization token and secret from the service. The
-    token and secret are stored in our database, and the auth token is
-    returned.
+    Actually gets the authorization token and secret from the service,
+    and the auth token is returned.
     """
 
     response = self.make_request(self.request_url)
@@ -267,11 +238,8 @@ class OAuthClient():
     auth_token = result["token"]
     auth_secret = result["secret"]
 
-    # Save the auth token and secret in our database.
-    auth = AuthToken(service=self.service_name,
-                     token=auth_token,
-                     secret=auth_secret)
-    auth.put()
+    self.auth_token = result["token"]
+    self.auth_secret = result["secret"]
 
     # Add the secret to memcache as well.
     memcache.set(self._get_memcache_auth_key(auth_token), auth_secret,
@@ -532,8 +500,7 @@ class DropboxClient(OAuthClient):
     user_info["country"] = data["country"]
 
     return user_info
-
-
+    
 class LinkedInClient(OAuthClient):
   """LinkedIn Client.
 
@@ -578,6 +545,6 @@ class LinkedInClient(OAuthClient):
     data = json.loads(response.content)
     user_info = self._get_default_user_info()
     user_info["id"] = data["id"]
-    user_info["picture"] = data["pictureUrl"]
+    user_info["picture"] = data.get("pictureUrl", "")
     user_info["name"] = data["firstName"] + " " + data["lastName"]
     return user_info
