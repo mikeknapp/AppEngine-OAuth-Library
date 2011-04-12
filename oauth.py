@@ -65,6 +65,7 @@ YAHOO = "yahoo"
 MYSPACE = "myspace"
 DROPBOX = "dropbox"
 LINKEDIN = "linkedin"
+YAMMER = "yammer"
 
 
 class OAuthException(Exception):
@@ -87,6 +88,8 @@ def get_oauth_client(service, key, secret, callback_url):
     return DropboxClient(key, secret, callback_url)
   elif service == LINKEDIN:
     return LinkedInClient(key, secret, callback_url)
+  elif service == YAMMER:
+    return YammerClient(key, secret, callback_url)
   else:
     raise Exception, "Unknown OAuth service %s" % service
 
@@ -580,4 +583,52 @@ class LinkedInClient(OAuthClient):
     user_info["id"] = data["id"]
     user_info["picture"] = data["pictureUrl"]
     user_info["name"] = data["firstName"] + " " + data["lastName"]
+    return user_info
+
+
+class YammerClient(OAuthClient):
+  """Yammer Client.
+
+  A client for talking to the Yammer API using OAuth as the
+  authentication model.
+  """
+
+  def __init__(self, consumer_key, consumer_secret, callback_url):
+    """Constructor."""
+
+    OAuthClient.__init__(self,
+        YAMMER,
+        consumer_key,
+        consumer_secret,
+        "https://www.yammer.com/oauth/request_token",
+        "https://www.yammer.com/oauth/access_token",
+        callback_url)
+
+  def get_authorization_url(self):
+    """Get Authorization URL."""
+
+    token = self._get_auth_token()
+    return ("https://www.yammer.com/oauth/authorize?oauth_token=%s"
+            "&oauth_callback=%s" % (token, urlquote(self.callback_url)))
+
+  def _lookup_user_info(self, access_token, access_secret):
+    """Lookup User Info.
+
+    Lookup the user on Yammer
+    """
+
+    user_info = self._get_default_user_info()
+
+    # Grab the user's profile from Yammer.
+    response = self.make_request("https://www.yammer.com/api/v1/users/current.json",
+                                 token=access_token,
+                                 secret=access_secret,
+                                 protected=False,
+                                 headers={"x-li-format":"json"})
+
+    data = json.loads(response.content)
+    user_info = self._get_default_user_info()
+    user_info["id"] = data["name"]
+    user_info["picture"] = data["mugshot_url"]
+    user_info["name"] = data["full_name"]
     return user_info
