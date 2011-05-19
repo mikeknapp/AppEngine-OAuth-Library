@@ -579,7 +579,6 @@ class LinkedInClient(OAuthClient):
                                  headers={"x-li-format":"json"})
 
     data = json.loads(response.content)
-    user_info = self._get_default_user_info()
     user_info["id"] = data["id"]
     user_info["picture"] = data["pictureUrl"]
     user_info["name"] = data["firstName"] + " " + data["lastName"]
