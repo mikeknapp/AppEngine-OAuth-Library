@@ -374,7 +374,7 @@ class TwitterClient(OAuthClient):
     """
 
     response = self.make_request(
-        "http://api.twitter.com/account/verify_credentials.json",
+        "http://api.twitter.com/1.1/account/verify_credentials.json",
         token=access_token, secret=access_secret, protected=True)
 
     data = json.loads(response.content)
