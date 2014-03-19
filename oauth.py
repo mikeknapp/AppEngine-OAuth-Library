@@ -352,20 +352,20 @@ class TwitterClient(OAuthClient):
         TWITTER,
         consumer_key,
         consumer_secret,
-        "http://api.twitter.com/oauth/request_token",
-        "http://api.twitter.com/oauth/access_token",
+        "https://api.twitter.com/oauth/request_token",
+        "https://api.twitter.com/oauth/access_token",
         callback_url)
 
   def get_authorization_url(self):
     """Get Authorization URL."""
 
     token = self._get_auth_token()
-    return "http://api.twitter.com/oauth/authorize?oauth_token=%s" % token
+    return "https://api.twitter.com/oauth/authorize?oauth_token=%s" % token
 
   def get_authenticate_url(self):
     """Get Authentication URL."""
     token = self._get_auth_token()
-    return "http://api.twitter.com/oauth/authenticate?oauth_token=%s" % token
+    return "https://api.twitter.com/oauth/authenticate?oauth_token=%s" % token
 
   def _lookup_user_info(self, access_token, access_secret):
     """Lookup User Info.
@@ -374,7 +374,7 @@ class TwitterClient(OAuthClient):
     """
 
     response = self.make_request(
-        "http://api.twitter.com/1.1/account/verify_credentials.json",
+        "https://api.twitter.com/1.1/account/verify_credentials.json",
         token=access_token, secret=access_secret, protected=True)
 
     data = json.loads(response.content)
